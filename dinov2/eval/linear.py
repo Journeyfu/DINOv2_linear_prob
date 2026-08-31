@@ -122,6 +122,20 @@ def get_args_parser(
         help="Path to a file containing pretrained linear classifiers",
     )
     parser.add_argument(
+        "--n-last-blocks",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Intermediate depths to probe (defaults to the backbone recommendation)",
+    )
+    parser.add_argument(
+        "--pooling-modes",
+        choices=("global", "global+patch"),
+        nargs="+",
+        default=None,
+        help="Feature readouts to probe (defaults to the backbone recommendation)",
+    )
+    parser.add_argument(
         "--val-class-mapping-fpath",
         type=str,
         help="Path to a file containing a mapping to adjust classifier outputs",
@@ -232,11 +246,18 @@ def scale_lr(learning_rates, batch_size):
     return learning_rates * (batch_size * distributed.get_global_size()) / 256.0
 
 
-def setup_linear_classifiers(sample_output, n_last_blocks_list, learning_rates, batch_size, num_classes=1000):
+def setup_linear_classifiers(
+    sample_output,
+    n_last_blocks_list,
+    learning_rates,
+    batch_size,
+    num_classes=1000,
+    use_avgpool_list=(False, True),
+):
     linear_classifiers_dict = nn.ModuleDict()
     optim_param_groups = []
     for n in n_last_blocks_list:
-        for avgpool in [False, True]:
+        for avgpool in use_avgpool_list:
             for _lr in learning_rates:
                 lr = scale_lr(_lr, batch_size)
                 out_dim = create_linear_input(sample_output, use_n_blocks=n, use_avgpool=avgpool).shape[1]
@@ -244,9 +265,9 @@ def setup_linear_classifiers(sample_output, n_last_blocks_list, learning_rates, 
                     out_dim, use_n_blocks=n, use_avgpool=avgpool, num_classes=num_classes
                 )
                 linear_classifier = linear_classifier.cuda()
-                linear_classifiers_dict[
-                    f"classifier_{n}_blocks_avgpool_{avgpool}_lr_{lr:.5f}".replace(".", "_")
-                ] = linear_classifier
+                linear_classifiers_dict[f"classifier_{n}_blocks_avgpool_{avgpool}_lr_{lr:.5f}".replace(".", "_")] = (
+                    linear_classifier
+                )
                 optim_param_groups.append({"params": linear_classifier.parameters(), "lr": lr})
 
     linear_classifiers = AllClassifiers(linear_classifiers_dict)
@@ -480,6 +501,8 @@ def run_eval_linear(
     test_class_mapping_fpaths=[None],
     val_metric_type=MetricType.MEAN_ACCURACY,
     test_metric_types=None,
+    n_last_blocks_list=None,
+    pooling_modes=None,
 ):
     seed = 0
 
@@ -500,7 +523,17 @@ def run_eval_linear(
     sampler_type = SamplerType.SHARDED_INFINITE
     # sampler_type = SamplerType.INFINITE
 
-    n_last_blocks_list = [1, 4]
+    if n_last_blocks_list is None:
+        n_last_blocks_list = list(getattr(model, "linear_probe_n_last_blocks", (1, 4)))
+    if pooling_modes is None:
+        use_avgpool_list = list(getattr(model, "linear_probe_use_avgpool", (False, True)))
+    else:
+        use_avgpool_list = [mode == "global+patch" for mode in pooling_modes]
+    logger.info(
+        "Linear probe feature grid: n_last_blocks=%s, pooling=%s",
+        n_last_blocks_list,
+        ["global+patch" if value else "global" for value in use_avgpool_list],
+    )
     n_last_blocks = max(n_last_blocks_list)
     autocast_ctx = partial(torch.cuda.amp.autocast, enabled=True, dtype=autocast_dtype)
     feature_model = ModelWithIntermediateLayers(model, n_last_blocks, autocast_ctx)
@@ -512,6 +545,7 @@ def run_eval_linear(
         learning_rates,
         batch_size,
         training_num_classes,
+        use_avgpool_list=use_avgpool_list,
     )
 
     optimizer = torch.optim.SGD(optim_param_groups, momentum=0.9, weight_decay=0)
@@ -614,6 +648,8 @@ def main(args):
         test_metric_types=args.test_metric_types,
         val_class_mapping_fpath=args.val_class_mapping_fpath,
         test_class_mapping_fpaths=args.test_class_mapping_fpaths,
+        n_last_blocks_list=args.n_last_blocks,
+        pooling_modes=args.pooling_modes,
     )
     return 0
 

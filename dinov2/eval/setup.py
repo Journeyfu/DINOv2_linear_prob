@@ -32,7 +32,7 @@ def get_args_parser(
     parser.add_argument(
         "--pretrained-weights",
         type=str,
-        help="Pretrained model weights",
+        help="Pretrained model weights (optional when a timm config enables its published weights)",
     )
     parser.add_argument(
         "--output-dir",
@@ -60,8 +60,16 @@ def get_autocast_dtype(config):
 
 
 def build_model_for_eval(config, pretrained_weights):
-    model, _ = build_model_from_cfg(config, only_teacher=True)
-    dinov2_utils.load_pretrained_weights(model, pretrained_weights, "teacher")
+    is_timm_hierarchical = config.student.arch.removesuffix("_memeff") == "timm_hierarchical"
+    model, _ = build_model_from_cfg(
+        config,
+        only_teacher=True,
+        pretrained_weights=pretrained_weights if is_timm_hierarchical else None,
+    )
+    if not is_timm_hierarchical:
+        if not pretrained_weights:
+            raise ValueError("--pretrained-weights is required for DINOv2 backbones")
+        dinov2_utils.load_pretrained_weights(model, pretrained_weights, "teacher")
     model.eval()
     model.cuda()
     return model

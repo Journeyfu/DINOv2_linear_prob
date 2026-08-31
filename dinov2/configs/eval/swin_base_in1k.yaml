@@ -1,0 +1,7 @@
+student:
+  arch: timm_hierarchical
+  timm_model_name: swin_base_patch4_window7_224.ms_in1k
+  timm_pretrained: true
+crops:
+  global_crops_size: 224
+  local_crops_size: 96

@@ -12,6 +12,11 @@
 
 # DINOv2: Learning Robust Visual Features without Supervision
 
+> **Hierarchical ViT linear probing:** this fork supports frozen
+> PVTv2-B2 and Swin-Base probes on ImageNet-1K and ADE20K. See
+> [docs/HVIT_LINEAR_PROBING.md](docs/HVIT_LINEAR_PROBING.md) for commands and
+> protocol details.
+
 **[Meta AI Research, FAIR](https://ai.facebook.com/research/)**
 
 Maxime Oquab,

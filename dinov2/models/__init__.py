@@ -6,14 +6,21 @@
 import logging
 
 from . import vision_transformer as vits
+from .hierarchical_transformer import build_timm_hierarchical_backbone
 
 
 logger = logging.getLogger("dinov2")
 
 
-def build_model(args, only_teacher=False, img_size=224):
+def build_model(args, only_teacher=False, img_size=224, pretrained_weights=None):
     args.arch = args.arch.removesuffix("_memeff")
-    if "vit" in args.arch:
+    if args.arch == "timm_hierarchical":
+        teacher = build_timm_hierarchical_backbone(args, pretrained_weights=pretrained_weights)
+        if only_teacher:
+            return teacher, teacher.embed_dim
+        student = build_timm_hierarchical_backbone(args, pretrained_weights=pretrained_weights)
+        embed_dim = student.embed_dim
+    elif "vit" in args.arch:
         vit_kwargs = dict(
             img_size=img_size,
             patch_size=args.patch_size,
@@ -38,8 +45,15 @@ def build_model(args, only_teacher=False, img_size=224):
             drop_path_uniform=args.drop_path_uniform,
         )
         embed_dim = student.embed_dim
+    else:
+        raise ValueError(f"Unsupported architecture: {args.arch}")
     return student, teacher, embed_dim
 
 
-def build_model_from_cfg(cfg, only_teacher=False):
-    return build_model(cfg.student, only_teacher=only_teacher, img_size=cfg.crops.global_crops_size)
+def build_model_from_cfg(cfg, only_teacher=False, pretrained_weights=None):
+    return build_model(
+        cfg.student,
+        only_teacher=only_teacher,
+        img_size=cfg.crops.global_crops_size,
+        pretrained_weights=pretrained_weights,
+    )
